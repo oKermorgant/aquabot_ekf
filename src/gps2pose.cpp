@@ -1,5 +1,4 @@
 #include <aquabot_ekf/boat.h>
-#include <aquabot_ekf/ally.h>
 #include <aquabot_ekf/gps2enu.h>
 
 #include <geometry_msgs/msg/pose_array.hpp>
@@ -17,38 +16,40 @@ public:
   {
     set_parameter(rclcpp::Parameter("use_sim_time", true));
 
-    static auto gps_sub = create_subscription<NavSatFix>("/wamv/sensors/gps/gps/fix", 5, [this](NavSatFix::UniquePtr msg)
+    static auto gps_sub = create_subscription<NavSatFix>("/aquabot/sensors/gps/gps/fix", 5, [this](NavSatFix::UniquePtr msg)
     {boat.updatePose(*msg);});
 
-    static auto imu_sub = create_subscription<Imu>("/wamv/sensors/imu/imu/data", 1, [this](Imu::UniquePtr msg)
+    static auto imu_sub = create_subscription<Imu>("/aquabot/sensors/imu/imu/data", 1, [this](Imu::UniquePtr msg)
     {boat.updateImu(*msg);});
 
-    static auto buoy_sub = create_subscription<ParamVec>("/wamv/sensors/acoustics/receiver/range_bearing", 1, [this](ParamVec::UniquePtr msg)
-    {boat.updateBuoy(*msg);});
-
-    static auto ally_sub = create_subscription<PoseArray>("/wamv/ais_sensor/allies_positions", 1, [this](PoseArray::UniquePtr msg)
-    {processAllies(*msg);});
+    obs_pub = create_publisher<PoseArray>("/aquabot/turbines", 1);
+    obs_sub = create_subscription<PoseArray>("/aquabot/ais_sensor/windturbines_positions", 1, [this](PoseArray::UniquePtr msg)
+    {toPoses(*msg);});
   }
 
 
 private:
   toENU enu;
-
   Boat boat;
 
-  std::vector<Ally> allies;
+  rclcpp::Publisher<PoseArray>::SharedPtr obs_pub;
+  rclcpp::Subscription<PoseArray>::SharedPtr obs_sub;
 
-  void processAllies(const PoseArray &msg)
+  void toPoses(const PoseArray &msg)
   {
-    if(allies.size() < msg.poses.size())
-    {
-     allies.reserve(msg.poses.size());
-     for(uint _ = allies.size(); _ < msg.poses.size(); ++_)
-       allies.emplace_back(this, &enu);
-    }
+    if(!enu.isInit())
+      return;
 
-    for(uint i = 0; i < msg.poses.size(); ++i)
-      allies[i].updatePose(msg.poses[i]);
+    PoseArray poses;
+    poses.poses.reserve(msg.poses.size());
+
+    for(auto &gps: msg.poses)
+    {
+      auto &p{poses.poses.emplace_back()};
+      p.orientation = gps.orientation;
+      enu.transform(gps.position.x, gps.position.y, 1., p.position);
+    }
+    obs_pub->publish(poses);
   }
 
 };
@@ -59,8 +60,8 @@ private:
 
 int main(int argc, char** argv)
 {
-    rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<aquabot_ekf::GPS2Pose>());
-    rclcpp::shutdown();
-    return 0;
-  }
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<aquabot_ekf::GPS2Pose>());
+  rclcpp::shutdown();
+  return 0;
+}

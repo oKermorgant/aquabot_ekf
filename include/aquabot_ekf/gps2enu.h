@@ -17,12 +17,6 @@ struct toENU
   double X0,Y0,Z0;
   int zone{-1};
 
-  inline void printZone(int zone, double latitude, double longitude) const
-  {
-    std::cout << "Zone @ (" << latitude << ", " << longitude << ") is #"
-              << zone << std::endl;
-  }
-
   inline bool isInit() const
   {
     return zone > 0;
@@ -30,7 +24,7 @@ struct toENU
 
   inline void setReference(const sensor_msgs::msg::NavSatFix &gps)
   {
-    bool northp{true};
+    auto northp{true};
     GeographicLib::UTMUPS::Forward(gps.latitude, gps.longitude,
                                    zone, northp, X0,Y0);
     Z0 = gps.altitude - 1.62;

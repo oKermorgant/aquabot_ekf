@@ -3,11 +3,9 @@
 
 #include <rclcpp/node.hpp>
 #include <aquabot_ekf/gps2enu.h>
-#include <aquabot_ekf/tf_listener.h>
 #include <aquabot_ekf/covariances.h>
 #include <sensor_msgs/msg/imu.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
-#include <tf2_ros/transform_broadcaster.h>
 #include <ros_gz_interfaces/msg/param_vec.hpp>
 
 using ros_gz_interfaces::msg::ParamVec;
@@ -20,22 +18,17 @@ struct Boat
   rclcpp::Node* node;
   toENU* enu;
 
-  // for the buoy
-  tf2_ros::TransformBroadcaster br;
-  TFListener listener;
-  TransformStamped buoy;
-
   // forwarded messages
   PoseWithCovarianceStamped pose;
   Imu imu;
   rclcpp::Publisher<PoseWithCovarianceStamped>::SharedPtr pose_pub;
   rclcpp::Publisher<Imu>::SharedPtr imu_pub;
 
-  Boat(rclcpp::Node* node, toENU* enu) : node{node}, enu{enu}, br{node}, listener{node}
+  Boat(rclcpp::Node* node, toENU* enu) : node{node}, enu{enu}
   {
     // init pose and imu messages
     pose.header.frame_id = "world";
-    imu.header.frame_id = "wamv/wamv/imu_wamv_link/imu_wamv_sensor";
+    imu.header.frame_id = "aquabot/wamv/imu_wamv_link/imu_wamv_sensor";
 
     for(auto i: {0, 7})
       pose.pose.covariance[i] = Covariances::xy;
@@ -50,11 +43,8 @@ struct Boat
       imu.orientation_covariance[i] = Covariances::rpy;
     }
 
-    pose_pub = node->create_publisher<PoseWithCovarianceStamped>("/wamv/gps_pose", rclcpp::SensorDataQoS());
-    imu_pub = node->create_publisher<Imu>("/wamv/imu", rclcpp::SensorDataQoS());
-
-    buoy.header.frame_id = "wamv/wamv/receiver";
-    buoy.child_frame_id = "buoy";
+    pose_pub = node->create_publisher<PoseWithCovarianceStamped>("/aquabot/gps_pose", rclcpp::SensorDataQoS());
+    imu_pub = node->create_publisher<Imu>("/aquabot/imu", rclcpp::SensorDataQoS());
   }
 
   inline void updatePose(const NavSatFix &gps)
@@ -65,24 +55,10 @@ struct Boat
     enu->transform(gps.latitude, gps.longitude, gps.altitude,
                    pose.pose.pose.position);
 
-    // TODO this is the XYZ of the GPS receiver, not of the base_link
-    // get offset between base and gps
-    const auto offset{listener.tryGetTF("wamv/wamv/base_link", "wamv/wamv/gps_wamv_link/navsat")};
-    const auto base{listener.tryGetTF("world", "wamv/wamv/base_link")};
+    pose.pose.pose.position.z -= 1.62;  // not quite
 
-    if(offset.has_value() && base.has_value())
-    {
-    //  std::cout << offset->translation.z << std::endl;
-
-    //  const auto theta{atan2(offset->rotation.z, offset.rotation.w)};
-
-
-
-      pose.pose.pose.position.z -= 1.62;  // not quite
-
-      pose.header.stamp = node->get_clock()->now();
-      pose_pub->publish(pose);
-    }
+    pose.header.stamp = node->get_clock()->now();
+    pose_pub->publish(pose);
   }
 
   inline void updateImu(const Imu &imu)
@@ -93,28 +69,6 @@ struct Boat
     this->imu.header.stamp = node->get_clock()->now();
     imu_pub->publish(this->imu);
   }
-
-  inline void updateBuoy(const ParamVec &msg)
-  {
-    const double *rho{}, *theta{};
-    for(const auto &param: msg.params)
-    {
-      if(param.name == "range")
-        rho = &(param.value.double_value);
-      else if(param.name == "bearing")
-        theta = &(param.value.double_value);
-    }
-
-    if(rho == nullptr || theta == nullptr)
-      return;
-
-    buoy.transform.translation.x = (*rho) * cos(*theta);
-    buoy.transform.translation.y = (*rho) * sin(*theta);
-
-    buoy.header.stamp = node->get_clock()->now();
-    br.sendTransform(buoy);
-  }
-
 };
 }
 
